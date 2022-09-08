@@ -31,6 +31,7 @@ from mlflow.projects.utils import get_databricks_env_vars
 from mlflow.tracking import MlflowClient
 from mlflow.tracking.fluent import _get_experiment_id
 from mlflow.utils.databricks_utils import get_databricks_run_url
+from mlflow.utils.file_utils import write_yaml
 from mlflow.utils.mlflow_tags import (
     MLFLOW_SOURCE_TYPE,
     MLFLOW_PIPELINE_TEMPLATE_NAME,
@@ -192,6 +193,10 @@ class TrainStep(BaseStep):
                     best_combined_params = dict(estimator_hardcoded_params, **best_hp_params)
                 else:
                     best_combined_params = estimator_hardcoded_params
+
+                write_yaml(
+                    root=output_directory, file_name="best_params.yaml", data=best_combined_params
+                )
 
                 estimator = estimator_fn(best_combined_params)
             else:
