@@ -589,6 +589,9 @@ class TrainStep(BaseStep):
                     if "algorithm" not in step_config["tuning"]:
                         step_config["tuning"]["algorithm"] = "hyperopt.rand.suggest"
 
+                    if "parallelism" not in step_config["tuning"]:
+                        step_config["tuning"]["parallelism"] = 1
+
                     if "max_trials" not in step_config["tuning"]:
                         raise MlflowException(
                             "The 'max_trials' configuration in the train step must be provided.",
@@ -697,7 +700,14 @@ class TrainStep(BaseStep):
         algo_type, algo_name = tuning_params["algorithm"].rsplit(".", 1)
         tuning_algo = getattr(importlib.import_module(algo_type, "hyperopt"), algo_name)
         max_trials = tuning_params["max_trials"]
-        hp_trials = Trials()
+        parallelism = tuning_params["parallelism"]
+
+        if parallelism > 1:
+            from hyperopt import SparkTrials
+
+            hp_trials = SparkTrials(parallelism)
+        else:
+            hp_trials = Trials()
 
         best_hp_params = fmin(
             objective,
