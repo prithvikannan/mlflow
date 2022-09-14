@@ -659,9 +659,9 @@ class TrainStep(BaseStep):
 
         if parallelism > 1:
             from hyperopt import SparkTrials
-            from pyspark.sql import SparkSession
+            from mlflow.utils._spark_utils import _get_active_spark_session
 
-            spark_session = SparkSession.builder.getOrCreate()
+            spark_session = _get_active_spark_session()
             sc = spark_session.sparkContext
 
             X_train = sc.broadcast(X_train)
