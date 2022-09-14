@@ -658,6 +658,13 @@ class TrainStep(BaseStep):
                 estimator = estimator_fn(estimator_args)
 
                 sample_fraction = self.step_config["sample_fraction"]
+
+                # if sparktrials, then read from broadcast
+                if tuning_params["parallelism"] > 1:
+                    X_train = X_train.value
+                    y_train = y_train.value
+                    validation_df = validation_df.value
+
                 X_train_sampled = X_train.sample(frac=sample_fraction, random_state=42)
                 y_train_sampled = y_train.sample(frac=sample_fraction, random_state=42)
 
@@ -704,8 +711,16 @@ class TrainStep(BaseStep):
 
         if parallelism > 1:
             from hyperopt import SparkTrials
+            from pyspark.sql import SparkSession
 
-            hp_trials = SparkTrials(parallelism)
+            spark_session = SparkSession.getOrCreate()
+            sc = spark_session.sparkContext
+
+            X_train = sc.broadcast(X_train)
+            y_train = sc.broadcast(y_train)
+            validation_df = sc.broadcast(validation_df)
+
+            hp_trials = SparkTrials(parallelism, spark_session=spark_session)
         else:
             hp_trials = Trials()
 
