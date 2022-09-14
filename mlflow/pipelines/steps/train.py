@@ -675,7 +675,7 @@ class TrainStep(BaseStep):
             hp_trials = Trials()
 
         # wrap training in objective fn
-        def objective(hyperparameter_args):
+        def objective(X_train, y_train, validation_df, hyperparameter_args):
             with mlflow.start_run(nested=True) as tuning_run:
                 estimator_args = dict(estimator_hardcoded_params, **hyperparameter_args)
                 estimator = estimator_fn(estimator_args)
@@ -728,14 +728,16 @@ class TrainStep(BaseStep):
                 return sign * eval_result.metrics[self.primary_metric]
 
         best_hp_params = fmin(
-            objective,
+            lambda params: objective(X_train, y_train, validation_df, params),
             search_space,
             algo=tuning_algo,
             max_evals=max_trials,
             trials=hp_trials,
         )
         best_hp_estimator_loss = hp_trials.best_trial["result"]["loss"]
-        hardcoded_estimator_loss = objective(estimator_hardcoded_params)
+        hardcoded_estimator_loss = objective(
+            X_train, y_train, validation_df, estimator_hardcoded_params
+        )
 
         if best_hp_estimator_loss < hardcoded_estimator_loss:
             best_hardcoded_params = {
