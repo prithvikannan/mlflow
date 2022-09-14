@@ -664,7 +664,9 @@ class TrainStep(BaseStep):
             spark_session = _get_active_spark_session()
             sc = spark_session.sparkContext
 
+            print("X_train (before broadcast): ", X_train)
             X_train = sc.broadcast(X_train)
+            print("X_train (after broadcast): ", X_train)
             y_train = sc.broadcast(y_train)
             validation_df = sc.broadcast(validation_df)
 
@@ -681,7 +683,8 @@ class TrainStep(BaseStep):
                 sample_fraction = self.step_config["sample_fraction"]
 
                 # if sparktrials, then read from broadcast
-                if tuning_params["parallelism"] > 1:
+                if parallelism > 1:
+                    # getting an error here
                     X_train = X_train.value
                     y_train = y_train.value
                     validation_df = validation_df.value
