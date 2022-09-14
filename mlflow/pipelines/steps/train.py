@@ -651,6 +651,27 @@ class TrainStep(BaseStep):
                 error_code=BAD_REQUEST,
             )
 
+        search_space = TrainStep._construct_search_space_from_yaml(tuning_params["parameters"])
+        algo_type, algo_name = tuning_params["algorithm"].rsplit(".", 1)
+        tuning_algo = getattr(importlib.import_module(algo_type, "hyperopt"), algo_name)
+        max_trials = tuning_params["max_trials"]
+        parallelism = tuning_params["parallelism"]
+
+        if parallelism > 1:
+            from hyperopt import SparkTrials
+            from pyspark.sql import SparkSession
+
+            spark_session = SparkSession.builder.getOrCreate()
+            sc = spark_session.sparkContext
+
+            X_train = sc.broadcast(X_train)
+            y_train = sc.broadcast(y_train)
+            validation_df = sc.broadcast(validation_df)
+
+            hp_trials = SparkTrials(parallelism, spark_session=spark_session)
+        else:
+            hp_trials = Trials()
+
         # wrap training in objective fn
         def objective(hyperparameter_args):
             with mlflow.start_run(nested=True) as tuning_run:
@@ -702,27 +723,6 @@ class TrainStep(BaseStep):
                 # return +/- metric
                 sign = -1 if self.evaluation_metrics_greater_is_better[self.primary_metric] else 1
                 return sign * eval_result.metrics[self.primary_metric]
-
-        search_space = TrainStep._construct_search_space_from_yaml(tuning_params["parameters"])
-        algo_type, algo_name = tuning_params["algorithm"].rsplit(".", 1)
-        tuning_algo = getattr(importlib.import_module(algo_type, "hyperopt"), algo_name)
-        max_trials = tuning_params["max_trials"]
-        parallelism = tuning_params["parallelism"]
-
-        if parallelism > 1:
-            from hyperopt import SparkTrials
-            from pyspark.sql import SparkSession
-
-            spark_session = SparkSession.getOrCreate()
-            sc = spark_session.sparkContext
-
-            X_train = sc.broadcast(X_train)
-            y_train = sc.broadcast(y_train)
-            validation_df = sc.broadcast(validation_df)
-
-            hp_trials = SparkTrials(parallelism, spark_session=spark_session)
-        else:
-            hp_trials = Trials()
 
         best_hp_params = fmin(
             objective,
