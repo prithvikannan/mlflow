@@ -664,9 +664,7 @@ class TrainStep(BaseStep):
             spark_session = _get_active_spark_session()
             sc = spark_session.sparkContext
 
-            print("X_train (before broadcast): ", X_train)
             X_train = sc.broadcast(X_train)
-            print("X_train (after broadcast): ", X_train)
             y_train = sc.broadcast(y_train)
             validation_df = sc.broadcast(validation_df)
 
