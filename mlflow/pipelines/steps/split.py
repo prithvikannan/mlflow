@@ -87,7 +87,7 @@ def _parallelize_on_rows(data, func, num_of_processes=8):
 def _hash_pandas_dataframe(input_df):
     from pandas.util import hash_pandas_object
 
-    hashed_input_df = _parallelize_on_rows(input_df, _make_elem_hashable)
+    hashed_input_df = input_df.applymap(_make_elem_hashable)
     return hash_pandas_object(hashed_input_df)
 
 
