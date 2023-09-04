@@ -4,6 +4,7 @@ import tempfile
 import time
 from datetime import datetime
 from typing import List
+import logging
 
 from mlflow.entities.param import Param
 from mlflow.entities.run_status import RunStatus
@@ -11,6 +12,7 @@ from mlflow.entities.run_tag import RunTag
 from mlflow.utils.file_utils import make_containing_dirs, write_to
 from mlflow.utils.mlflow_tags import MLFLOW_LOGGED_ARTIFACTS, MLFLOW_RUN_SOURCE_TYPE
 
+_logger = logging.getLogger(__name__)
 
 def create_eval_results_json(prompt_parameters, model_input, model_output_parameters, model_output):
     columns = [param.key for param in prompt_parameters] + ["prompt", "output"]
@@ -44,90 +46,97 @@ def _create_promptlab_run_impl(
     run = store.create_run(experiment_id, user_id, start_time, tags, run_name)
     run_id = run.info.run_id
 
+    # try:
+    prompt_parameters = [
+        Param(key=param.key, value=str(param.value)) for param in prompt_parameters
+    ]
+    model_parameters = [
+        Param(key=param.key, value=str(param.value)) for param in model_parameters
+    ]
+    model_output_parameters = [
+        Param(key=param.key, value=str(param.value)) for param in model_output_parameters
+    ]
+
+    # log model parameters
+    parameters_to_log = [
+        *model_parameters,
+        Param("model_route", model_route),
+        Param("prompt_template", prompt_template),
+    ]
+
+    tags_to_log = [
+        RunTag(
+            MLFLOW_LOGGED_ARTIFACTS,
+            json.dumps([{"path": "eval_results_table.json", "type": "table"}]),
+        ),
+        RunTag(MLFLOW_RUN_SOURCE_TYPE, "PROMPT_ENGINEERING"),
+    ]
+
+    store.log_batch(run_id, [], parameters_to_log, tags_to_log)
+
+    # log model
+    from mlflow.models import Model
+
+    artifact_dir = store.get_run(run_id).info.artifact_uri
+
+    utc_time_created = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")
+    promptlab_model = Model(
+        artifact_path=artifact_dir,
+        run_id=run_id,
+        utc_time_created=utc_time_created,
+    )
+    store.record_logged_model(run_id, promptlab_model)
+
     try:
-        prompt_parameters = [
-            Param(key=param.key, value=str(param.value)) for param in prompt_parameters
-        ]
-        model_parameters = [
-            Param(key=param.key, value=str(param.value)) for param in model_parameters
-        ]
-        model_output_parameters = [
-            Param(key=param.key, value=str(param.value)) for param in model_output_parameters
-        ]
-
-        # log model parameters
-        parameters_to_log = [
-            *model_parameters,
-            Param("model_route", model_route),
-            Param("prompt_template", prompt_template),
-        ]
-
-        tags_to_log = [
-            RunTag(
-                MLFLOW_LOGGED_ARTIFACTS,
-                json.dumps([{"path": "eval_results_table.json", "type": "table"}]),
-            ),
-            RunTag(MLFLOW_RUN_SOURCE_TYPE, "PROMPT_ENGINEERING"),
-        ]
-
-        store.log_batch(run_id, [], parameters_to_log, tags_to_log)
-
-        # log model
-        from mlflow.models import Model
-
-        artifact_dir = store.get_run(run_id).info.artifact_uri
-
-        utc_time_created = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")
-        promptlab_model = Model(
-            artifact_path=artifact_dir,
-            run_id=run_id,
-            utc_time_created=utc_time_created,
+        from mlflow.models.signature import ModelSignature
+        from mlflow.types.schema import ColSpec, DataType, Schema
+    except ImportError:
+        signature = None
+    else:
+        inputs_colspecs = [ColSpec(DataType.string, param.key) for param in prompt_parameters]
+        outputs_colspecs = [ColSpec(DataType.string, "output")]
+        signature = ModelSignature(
+            inputs=Schema(inputs_colspecs),
+            outputs=Schema(outputs_colspecs),
         )
-        store.record_logged_model(run_id, promptlab_model)
 
-        try:
-            from mlflow.models.signature import ModelSignature
-            from mlflow.types.schema import ColSpec, DataType, Schema
-        except ImportError:
-            signature = None
-        else:
-            inputs_colspecs = [ColSpec(DataType.string, param.key) for param in prompt_parameters]
-            outputs_colspecs = [ColSpec(DataType.string, "output")]
-            signature = ModelSignature(
-                inputs=Schema(inputs_colspecs),
-                outputs=Schema(outputs_colspecs),
-            )
+    from mlflow._promptlab import save_model
 
-        from mlflow._promptlab import save_model
+    # write artifact files
+    from mlflow.store.artifact.artifact_repository_registry import get_artifact_repository
+    from mlflow.server.handlers import _get_artifact_repo_mlflow_artifacts, _is_servable_proxied_run_artifact_root
 
-        # write artifact files
-        from mlflow.store.artifact.artifact_repository_registry import get_artifact_repository
-
+    if _is_servable_proxied_run_artifact_root(run.info.artifact_uri):
+        artifact_repo = _get_artifact_repo_mlflow_artifacts()
+    else:
         artifact_repo = get_artifact_repository(artifact_dir)
 
-        with tempfile.TemporaryDirectory() as local_dir:
-            save_model(
-                path=os.path.join(local_dir, "model"),
-                signature=signature,
-                input_example={"inputs": [param.value for param in prompt_parameters]},
-                prompt_template=prompt_template,
-                prompt_parameters=prompt_parameters,
-                model_parameters=model_parameters,
-                model_route=model_route,
-            )
+    with tempfile.TemporaryDirectory() as local_dir:
+        save_model(
+            path=os.path.join(local_dir, "model"),
+            signature=signature,
+            input_example={"inputs": [param.value for param in prompt_parameters]},
+            prompt_template=prompt_template,
+            prompt_parameters=prompt_parameters,
+            model_parameters=model_parameters,
+            model_route=model_route,
+        )
 
-            eval_results_json = create_eval_results_json(
-                prompt_parameters, model_input, model_output_parameters, model_output
-            )
-            eval_results_json_file_path = os.path.join(local_dir, "eval_results_table.json")
-            make_containing_dirs(eval_results_json_file_path)
-            write_to(eval_results_json_file_path, eval_results_json)
+        eval_results_json = create_eval_results_json(
+            prompt_parameters, model_input, model_output_parameters, model_output
+        )
+        eval_results_json_file_path = os.path.join(local_dir, "eval_results_table.json")
+        make_containing_dirs(eval_results_json_file_path)
+        write_to(eval_results_json_file_path, eval_results_json)
 
-            artifact_repo.log_artifacts(local_dir)
-    except Exception:
-        store.update_run_info(run_id, RunStatus.FAILED, int(time.time() * 1000), run_name)
-    else:
+        _logger.info("Logging artifact files")
+        artifact_repo.log_artifacts(local_dir)
+        _logger.info("Done logging artifact files")
+
+    # except Exception:
+    #     store.update_run_info(run_id, RunStatus.FAILED, int(time.time() * 1000), run_name)
+    # else:
         # end time is the current number of milliseconds since the UNIX epoch.
-        store.update_run_info(run_id, RunStatus.FINISHED, int(time.time() * 1000), run_name)
+    store.update_run_info(run_id, RunStatus.FINISHED, int(time.time() * 1000), run_name)
 
     return store.get_run(run_id=run_id)

@@ -1,0 +1,15 @@
+routes:
+  - name: prithvi-completions
+    route_type: llm/v1/completions
+    model:
+      provider: openai
+      name: gpt-3.5-turbo
+      config:
+        openai_api_key: "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"
+  - name: prithvi-chat
+    route_type: llm/v1/chat
+    model:
+      provider: openai
+      name: gpt-3.5-turbo
+      config:
+        openai_api_key: "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"
