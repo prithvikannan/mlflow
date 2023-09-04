@@ -1,10 +1,10 @@
 import json
+import logging
 import os
 import tempfile
 import time
 from datetime import datetime
 from typing import List
-import logging
 
 from mlflow.entities.param import Param
 from mlflow.entities.run_status import RunStatus
@@ -13,6 +13,7 @@ from mlflow.utils.file_utils import make_containing_dirs, write_to
 from mlflow.utils.mlflow_tags import MLFLOW_LOGGED_ARTIFACTS, MLFLOW_RUN_SOURCE_TYPE
 
 _logger = logging.getLogger(__name__)
+
 
 def create_eval_results_json(prompt_parameters, model_input, model_output_parameters, model_output):
     columns = [param.key for param in prompt_parameters] + ["prompt", "output"]
@@ -50,9 +51,7 @@ def _create_promptlab_run_impl(
     prompt_parameters = [
         Param(key=param.key, value=str(param.value)) for param in prompt_parameters
     ]
-    model_parameters = [
-        Param(key=param.key, value=str(param.value)) for param in model_parameters
-    ]
+    model_parameters = [Param(key=param.key, value=str(param.value)) for param in model_parameters]
     model_output_parameters = [
         Param(key=param.key, value=str(param.value)) for param in model_output_parameters
     ]
@@ -81,7 +80,7 @@ def _create_promptlab_run_impl(
 
     utc_time_created = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S.%f")
     promptlab_model = Model(
-        artifact_path=artifact_dir,
+        artifact_path="model",
         run_id=run_id,
         utc_time_created=utc_time_created,
     )
@@ -104,12 +103,6 @@ def _create_promptlab_run_impl(
 
     # write artifact files
     from mlflow.store.artifact.artifact_repository_registry import get_artifact_repository
-    from mlflow.server.handlers import _get_artifact_repo_mlflow_artifacts, _is_servable_proxied_run_artifact_root
-
-    if _is_servable_proxied_run_artifact_root(run.info.artifact_uri):
-        artifact_repo = _get_artifact_repo_mlflow_artifacts()
-    else:
-        artifact_repo = get_artifact_repository(artifact_dir)
 
     with tempfile.TemporaryDirectory() as local_dir:
         save_model(
@@ -129,14 +122,31 @@ def _create_promptlab_run_impl(
         make_containing_dirs(eval_results_json_file_path)
         write_to(eval_results_json_file_path, eval_results_json)
 
+        from mlflow.server.handlers import (
+            _get_artifact_repo_mlflow_artifacts,
+            _is_servable_proxied_run_artifact_root,
+        )
+
+        _logger.info("Getting artifact repo")
+        if _is_servable_proxied_run_artifact_root(run.info.artifact_uri):
+            artifact_repo = _get_artifact_repo_mlflow_artifacts()
+        else:
+            artifact_repo = get_artifact_repository(artifact_dir)
+
         _logger.info("Logging artifact files")
-        artifact_repo.log_artifacts(local_dir)
+        if _is_servable_proxied_run_artifact_root(run.info.artifact_uri):
+            artifact_repo.log_artifacts(
+                local_dir,
+                artifact_path=os.path.join(run.info.experiment_id, run.info.run_id, "artifacts"),
+            )
+        else:
+            artifact_repo.log_artifacts(local_dir)
         _logger.info("Done logging artifact files")
 
     # except Exception:
     #     store.update_run_info(run_id, RunStatus.FAILED, int(time.time() * 1000), run_name)
     # else:
-        # end time is the current number of milliseconds since the UNIX epoch.
+    # end time is the current number of milliseconds since the UNIX epoch.
     store.update_run_info(run_id, RunStatus.FINISHED, int(time.time() * 1000), run_name)
 
     return store.get_run(run_id=run_id)
