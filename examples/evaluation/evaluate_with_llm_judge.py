@@ -4,7 +4,7 @@ import openai
 import pandas as pd
 
 import mlflow
-from mlflow.metrics import EvaluationExample, correctness
+from mlflow.metrics import EvaluationExample, correctness, latency
 
 assert "OPENAI_API_KEY" in os.environ, "Please set the OPENAI_API_KEY environment variable."
 
@@ -61,7 +61,7 @@ with mlflow.start_run() as run:
         eval_df,
         targets="ground_truth",
         model_type="question-answering",
-        extra_metrics=[correctness_metric],
+        extra_metrics=[correctness_metric, latency()],
     )
     print(results)
 
